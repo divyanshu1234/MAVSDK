@@ -17,6 +17,13 @@ public:
         const std::string& path,
         int baudrate,
         bool flow_control);
+        
+    explicit SerialConnection(
+        Connection::receiver_callback_t receiver_callback,
+        int fd,
+        int baudrate,
+        bool flow_control);
+
     ConnectionResult start() override;
     ConnectionResult stop() override;
     ~SerialConnection();

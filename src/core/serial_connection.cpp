@@ -55,6 +55,18 @@ SerialConnection::SerialConnection(
     _flow_control(flow_control)
 {}
 
+SerialConnection::SerialConnection(
+    Connection::receiver_callback_t receiver_callback,
+    int fd,
+    int baudrate,
+    bool flow_control) :
+    Connection(receiver_callback),
+    _serial_node(std::to_string(fd)),
+    _baudrate(baudrate),
+    _flow_control(flow_control),
+    _fd(fd)
+{}
+
 SerialConnection::~SerialConnection()
 {
     // If no one explicitly called stop before, we should at least do it.
@@ -81,11 +93,25 @@ ConnectionResult SerialConnection::setup_port()
 {
 #if defined(LINUX) || defined(APPLE)
     // open() hangs on macOS or Linux devices(e.g. pocket beagle) unless you give it O_NONBLOCK
+    LogDebug() << "setup_port() version 0.0.7";
+    LogDebug() << "setup_port(): _fd: " << _fd;
+
+    // If _fd has been passed through cli args, then simply returning ConnectionResult::Success
+    if (_fd != -1) {
+        // _fd = fcntl(_fd, F_DUPFD_CLOEXEC, 0);
+        // if (fcntl(_fd, F_SETFL, 0) == -1) {
+        //     LogErr() << "fcntl failed: " << GET_ERROR();
+        //     return ConnectionResult::ConnectionError;
+        // }
+        return ConnectionResult::Success;
+    }
+
     _fd = open(_serial_node.c_str(), O_RDWR | O_NOCTTY | O_NONBLOCK);
     if (_fd == -1) {
-        LogErr() << "open failed: " << GET_ERROR();
+    LogErr() << "open failed: " << GET_ERROR();
         return ConnectionResult::ConnectionError;
     }
+    
     // We need to clear the O_NONBLOCK again because we can block while reading
     // as we do it in a separate thread.
     if (fcntl(_fd, F_SETFL, 0) == -1) {
@@ -281,8 +307,13 @@ bool SerialConnection::send_message(const mavlink_message_t& message)
     return true;
 }
 
+// Counter to avoid overflow of log messages
+int log_counter = 0;
+
 void SerialConnection::receive()
 {
+    LogDebug() << "receive(): _fd: " << _fd;
+
     // Enough for MTU 1500 bytes.
     char buffer[2048];
 
@@ -296,15 +327,30 @@ void SerialConnection::receive()
         int recv_len;
 #if defined(LINUX) || defined(APPLE)
         int pollrc = poll(fds, 1, 1000);
+
+        // Printing only 1 log for every 10000 iterations
+        ++log_counter;
+        if (log_counter == 10000) {
+            log_counter = 0;
+            LogDebug() << "receive(): _fd: " << fds[0].fd;
+            LogDebug() << "receive(): pollrc: " << pollrc;
+        }
+
         if (pollrc == 0 || !(fds[0].revents & POLLIN)) {
             continue;
         } else if (pollrc == -1) {
             LogErr() << "read poll failure: " << GET_ERROR();
         }
+
         // We enter here if (fds[0].revents & POLLIN) == true
         recv_len = static_cast<int>(read(_fd, buffer, sizeof(buffer)));
         if (recv_len < -1) {
             LogErr() << "read failure: " << GET_ERROR();
+        }
+
+        // Logging if message is received
+        if (recv_len != 0) {
+            LogDebug() << "receive(): recv_len: " << recv_len;
         }
 #else
         if (!ReadFile(_handle, buffer, sizeof(buffer), LPDWORD(&recv_len), NULL)) {

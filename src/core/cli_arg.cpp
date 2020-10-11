@@ -13,6 +13,7 @@ void CliArg::reset()
     _path.clear();
     _baudrate = 0;
     _port = 0;
+    _fd = -1;
 }
 
 bool CliArg::parse(const std::string& uri)
@@ -24,8 +25,14 @@ bool CliArg::parse(const std::string& uri)
         return false;
     }
 
-    if (!find_path(rest)) {
-        return false;
+    if (_serial_from_fd) {
+        if (!find_fd(rest)) {
+            return false;
+        }
+    } else {
+        if (!find_path(rest)) {
+            return false;
+        }
     }
 
     if (_protocol == Protocol::Serial) {
@@ -47,6 +54,7 @@ bool CliArg::find_protocol(std::string& rest)
     const std::string tcp = "tcp";
     const std::string serial = "serial";
     const std::string serial_flowcontrol = "serial_flowcontrol";
+    const std::string serial_fd = "serial_fd";
     const std::string delimiter = "://";
 
     if (rest.find(udp + delimiter) == 0) {
@@ -60,12 +68,20 @@ bool CliArg::find_protocol(std::string& rest)
     } else if (rest.find(serial + delimiter) == 0) {
         _protocol = Protocol::Serial;
         _flow_control_enabled = false;
+        _serial_from_fd = false;
         rest.erase(0, serial.length() + delimiter.length());
         return true;
     } else if (rest.find(serial_flowcontrol + delimiter) == 0) {
         _protocol = Protocol::Serial;
         _flow_control_enabled = true;
+        _serial_from_fd = false;
         rest.erase(0, serial_flowcontrol.length() + delimiter.length());
+        return true;
+    } else if (rest.find(serial_fd + delimiter) == 0) {
+        _protocol = Protocol::Serial;
+        _flow_control_enabled = false;
+        _serial_from_fd = true;
+        rest.erase(0, serial_fd.length() + delimiter.length());
         return true;
     } else {
         LogWarn() << "Unknown protocol";
@@ -162,6 +178,36 @@ bool CliArg::find_baudrate(std::string& rest)
         }
     }
     _baudrate = std::stoi(rest);
+    return true;
+}
+
+bool CliArg::find_fd(std::string& rest)
+{
+    if (rest.length() == 0) {  
+        LogWarn() << "fd for serial device required";
+        return false;
+    }
+
+    const std::string delimiter = ":";
+    std::string fd_str{};
+    size_t pos = rest.find(delimiter);
+    if (pos != rest.npos) {
+        fd_str = rest.substr(0, pos);
+        rest.erase(0, pos + delimiter.length());
+    } else {
+        fd_str = rest;
+        rest = "";
+    }
+
+    for (const auto& digit : fd_str) {
+        if (!std::isdigit(digit)) {
+            LogWarn() << "Non-numeric char found in fd";
+            _fd = -1;
+            return false;
+        }
+    }
+
+    _fd = std::stoi(fd_str);
     return true;
 }
 

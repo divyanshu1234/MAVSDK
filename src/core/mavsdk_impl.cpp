@@ -190,7 +190,14 @@ ConnectionResult MavsdkImpl::add_any_connection(const std::string& connection_ur
                 baudrate = cli_arg.get_baudrate();
             }
             bool flow_control = cli_arg.get_flow_control();
-            return add_serial_connection(cli_arg.get_path(), baudrate, flow_control);
+            bool serial_from_fd = cli_arg.get_serial_from_fd();
+            if (serial_from_fd) {
+                LogDebug() << "Adding serial connection using fd: " << cli_arg.get_fd();
+                return add_serial_connection(cli_arg.get_fd(), baudrate, flow_control);
+            } else {
+                LogDebug() << "Adding serial connection using path: " << cli_arg.get_path();
+                return add_serial_connection(cli_arg.get_path(), baudrate, flow_control);
+            }
         }
 
         default:
@@ -235,6 +242,24 @@ ConnectionResult MavsdkImpl::add_tcp_connection(const std::string& remote_ip, in
         std::bind(&MavsdkImpl::receive_message, this, std::placeholders::_1),
         remote_ip,
         remote_port);
+    if (!new_conn) {
+        return ConnectionResult::ConnectionError;
+    }
+    ConnectionResult ret = new_conn->start();
+    if (ret == ConnectionResult::Success) {
+        add_connection(new_conn);
+    }
+    return ret;
+}
+
+ConnectionResult
+MavsdkImpl::add_serial_connection(int dev_fd, int baudrate, bool flow_control) 
+{
+    auto new_conn = std::make_shared<SerialConnection>(
+    std::bind(&MavsdkImpl::receive_message, this, std::placeholders::_1),
+    dev_fd,
+    baudrate,
+    flow_control);
     if (!new_conn) {
         return ConnectionResult::ConnectionError;
     }
